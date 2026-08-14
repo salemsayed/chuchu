@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,11 +29,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jossephus.chuchu.model.AuthMethod
 import com.jossephus.chuchu.model.MultiplexerType
@@ -175,6 +182,7 @@ fun AddServerScreen(
                 KeyAuthSection(
                     form = form,
                     keys = keys,
+                    onSelectStoredKey = vm::selectStoredKey,
                     onGenerate = { vm.generateKey(form.name) },
                     onCopyPublicKey = {
                         if (form.publicKeyOpenSsh.isBlank()) {
@@ -330,17 +338,39 @@ private fun SectionHeader(label: String) {
 private fun KeyAuthSection(
     form: AddServerForm,
     keys: List<com.jossephus.chuchu.model.SshKey>,
+    onSelectStoredKey: (Long) -> Unit,
     onGenerate: () -> Unit,
     onCopyPublicKey: () -> Unit,
 ) {
     val typography = ChuTypography.current
     val colors = ChuColors.current
     val selectedKey = keys.firstOrNull { it.id == form.keyId }
+    var showKeyPicker by remember { mutableStateOf(false) }
 
     if (selectedKey != null) {
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            ChuText("● ", style = typography.body, color = colors.accent)
-            ChuText(selectedKey.name, style = typography.body, color = colors.textPrimary)
+        Box {
+            Row(
+                modifier = Modifier.clickable { showKeyPicker = true },
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                ChuText("● ", style = typography.body, color = colors.accent)
+                ChuText(selectedKey.name, style = typography.body, color = colors.textPrimary)
+            }
+            if (showKeyPicker) {
+                Popup(
+                    alignment = Alignment.BottomStart,
+                    onDismissRequest = { showKeyPicker = false },
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    StoredKeyPickerContent(
+                        keys = keys,
+                        onSelect = { keyId ->
+                            onSelectStoredKey(keyId)
+                            showKeyPicker = false
+                        },
+                    )
+                }
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -367,17 +397,92 @@ private fun KeyAuthSection(
         }
     } else {
         ChuText(
-            "generate an Ed25519 key, then copy the public key to ~/.ssh/authorized_keys on the remote host.",
+            if (keys.isEmpty()) {
+                "generate an Ed25519 key, then copy the public key to ~/.ssh/authorized_keys on the remote host."
+            } else {
+                "select an existing key or generate an Ed25519 key, then copy its public key to ~/.ssh/authorized_keys on the remote host."
+            },
             style = typography.bodySmall,
             color = colors.textMuted,
         )
-        ChuButton(
-            onClick = onGenerate,
-            variant = ChuButtonVariant.Outlined,
-            bracketed = true,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            ChuText("generate key", style = typography.label)
+        if (keys.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    ChuButton(
+                        onClick = { showKeyPicker = true },
+                        variant = ChuButtonVariant.Outlined,
+                        bracketed = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        ChuText("use existing", style = typography.label)
+                    }
+                    if (showKeyPicker) {
+                        Popup(
+                            alignment = Alignment.BottomStart,
+                            onDismissRequest = { showKeyPicker = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            StoredKeyPickerContent(
+                                keys = keys,
+                                onSelect = { keyId ->
+                                    onSelectStoredKey(keyId)
+                                    showKeyPicker = false
+                                },
+                            )
+                        }
+                    }
+                }
+                ChuButton(
+                    onClick = onGenerate,
+                    variant = ChuButtonVariant.Outlined,
+                    bracketed = true,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    ChuText("generate key", style = typography.label)
+                }
+            }
+        } else {
+            ChuButton(
+                onClick = onGenerate,
+                variant = ChuButtonVariant.Outlined,
+                bracketed = true,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                ChuText("generate key", style = typography.label)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StoredKeyPickerContent(
+    keys: List<com.jossephus.chuchu.model.SshKey>,
+    onSelect: (Long) -> Unit,
+) {
+    val colors = ChuColors.current
+    val typography = ChuTypography.current
+
+    Column(
+        modifier =
+            Modifier.widthIn(min = 160.dp, max = 280.dp)
+                .background(colors.background, RectangleShape)
+                .border(1.dp, colors.border, RectangleShape)
+                .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        keys.forEach { key ->
+            ChuText(
+                key.name,
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .clickable { onSelect(key.id) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                style = typography.label,
+                color = colors.textPrimary,
+            )
         }
     }
 }
